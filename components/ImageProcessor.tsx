@@ -108,6 +108,8 @@ async function loadAlphaMap(src: string, size: number): Promise<Float32Array> {
       resolve(calculateAlphaMap(imageData));
     };
     img.onerror = () => reject(new Error(`Failed to load ${src}`));
+    // crossOrigin must be set before src to avoid canvas taint on mobile browsers
+    img.crossOrigin = 'anonymous';
     img.src = src;
   });
 }
@@ -129,6 +131,41 @@ function loadImageToCanvas(
     };
 
     img.onerror = () => {
+      // If crossOrigin caused the failure (e.g. data: URLs on some mobile
+      // browsers), retry without it before falling back to fetch-as-blob.
+      if (img.crossOrigin) {
+        const img1b = new Image();
+        img1b.onload = () => {
+          canvas.width = img1b.naturalWidth || img1b.width;
+          canvas.height = img1b.naturalHeight || img1b.height;
+          ctx.drawImage(img1b, 0, 0);
+          resolve();
+        };
+        img1b.onerror = () => {
+          // Fallback: fetch as blob (handles SVG and CORS cases)
+          fetch(src)
+            .then((res) => res.blob())
+            .then((blob) => {
+              const blobUrl = URL.createObjectURL(blob);
+              const img2 = new Image();
+              img2.onload = () => {
+                canvas.width = img2.naturalWidth || img2.width;
+                canvas.height = img2.naturalHeight || img2.height;
+                ctx.drawImage(img2, 0, 0);
+                URL.revokeObjectURL(blobUrl);
+                resolve();
+              };
+              img2.onerror = () => {
+                URL.revokeObjectURL(blobUrl);
+                reject(new Error('Failed to load image'));
+              };
+              img2.src = blobUrl;
+            })
+            .catch(reject);
+        };
+        img1b.src = src;
+        return;
+      }
       // Fallback: fetch as blob (handles SVG and CORS cases)
       fetch(src)
         .then((res) => res.blob())
@@ -151,7 +188,11 @@ function loadImageToCanvas(
         .catch(reject);
     };
 
-    img.crossOrigin = 'anonymous';
+    // Only set crossOrigin for non-data URLs; setting it on data: URLs
+    // causes failures on some mobile browsers (iOS Safari, Android Chrome).
+    if (!src.startsWith('data:')) {
+      img.crossOrigin = 'anonymous';
+    }
     img.src = src;
   });
 }
@@ -267,8 +308,11 @@ const ImageProcessor = forwardRef<ImageProcessorHandle, ImageProcessorProps>(
         // Load the image onto the canvas
         try {
           await loadImageToCanvas(canvas, ctx, imageSrc);
-        } catch {
-          console.error('ImageProcessor: failed to load image');
+        } catch (err) {
+          console.error('ImageProcessor: failed to load image', err);
+          // On mobile, if canvas loading fails entirely, return the original
+          // so the UI doesn't get stuck in a processing state.
+          onProcessed(imageSrc);
           return;
         }
 
@@ -311,7 +355,7 @@ const ImageProcessor = forwardRef<ImageProcessorHandle, ImageProcessorProps>(
     return (
       <canvas
         ref={canvasRef}
-        className="hidden"
+        style={{ position: 'fixed', top: '-9999px', left: '-9999px', width: 1, height: 1 }}
         aria-hidden="true"
       />
     );
