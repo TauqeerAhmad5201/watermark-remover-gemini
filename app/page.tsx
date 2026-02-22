@@ -1,65 +1,174 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useRef, useCallback } from 'react';
+import ImageProcessor, { ImageProcessorHandle } from '@/components/ImageProcessor';
+import UploadZone from '@/components/UploadZone';
+import ProcessingControls from '@/components/ProcessingControls';
+import ResultPanel from '@/components/ResultPanel';
 
 export default function Home() {
+  const [originalImage, setOriginalImage] = useState<string | null>(null);
+  const [processedImage, setProcessedImage] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [fileName, setFileName] = useState<string>('');
+  const [settings, setSettings] = useState({
+    blurRadius: 15,
+    coverColor: '#ffffff',
+    method: 'remove' as 'blur' | 'fill' | 'inpaint' | 'remove',
+    opacity: 1.0,
+  });
+
+  const processorRef = useRef<ImageProcessorHandle | null>(null);
+
+  const handleImageUpload = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setOriginalImage(e.target?.result as string);
+      setProcessedImage(null);
+      setFileName(file.name);
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handleProcessed = useCallback((dataUrl: string) => {
+    setProcessedImage(dataUrl);
+    setIsProcessing(false);
+  }, []);
+
+  const handleProcess = () => {
+    setIsProcessing(true);
+    processorRef.current?.process();
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900">
+      {/* Header */}
+      <header className="border-b border-white/10 backdrop-blur-sm bg-white/5">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-400 to-blue-500 flex items-center justify-center">
+            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+          </div>
+          <div>
+            <h1 className="text-white font-bold text-lg leading-tight">Gemini Watermark Hider</h1>
+            <p className="text-white/50 text-xs">Hide AI-generated watermarks from images</p>
+          </div>
+          <div className="ml-auto">
+            <span className="text-xs bg-purple-500/20 text-purple-300 border border-purple-500/30 px-3 py-1 rounded-full">
+              Client-side Processing
+            </span>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      </header>
+
+      <div className="max-w-6xl mx-auto px-6 py-8">
+        {/* Hero */}
+        {!originalImage && (
+          <div className="text-center mb-10">
+            <h2 className="text-4xl font-bold text-white mb-3">
+              Hide Gemini Watermarks
+            </h2>
+            <p className="text-white/60 text-lg max-w-2xl mx-auto">
+              Upload an image generated by Google Gemini and we&apos;ll detect and hide the watermark using advanced canvas processing — all in your browser.
+            </p>
+          </div>
+        )}
+
+        {/* Upload Zone */}
+        {!originalImage ? (
+          <>
+            <UploadZone onUpload={handleImageUpload} />
+            {/* Quick test button */}
+            <div className="mt-4 text-center">
+              <button
+                onClick={async () => {
+                  const res = await fetch('/api/test-image');
+                  const blob = await res.blob();
+                  const file = new File([blob], 'test-gemini.svg', { type: 'image/svg+xml' });
+                  handleImageUpload(file);
+                }}
+                className="text-purple-400 hover:text-purple-300 text-sm underline underline-offset-2 transition-colors"
+              >
+                🧪 Load test image (simulated Gemini watermark)
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left: Controls */}
+            <div className="lg:col-span-1 space-y-4">
+              <ProcessingControls
+                settings={settings}
+                onChange={setSettings}
+                onProcess={handleProcess}
+                isProcessing={isProcessing}
+                hasImage={!!originalImage}
+              />
+              <button
+                onClick={() => {
+                  setOriginalImage(null);
+                  setProcessedImage(null);
+                  setFileName('');
+                }}
+                className="w-full py-2 px-4 rounded-lg border border-white/20 text-white/60 hover:text-white hover:border-white/40 transition-all text-sm"
+              >
+                ← Upload New Image
+              </button>
+            </div>
+
+            {/* Right: Image panels */}
+            <div className="lg:col-span-2 space-y-4">
+              {/* Hidden processor canvas */}
+              {originalImage && (
+                <ImageProcessor
+                  ref={processorRef}
+                  imageSrc={originalImage}
+                  settings={settings}
+                  onProcessed={handleProcessed}
+                />
+              )}
+
+              <ResultPanel
+                originalImage={originalImage}
+                processedImage={processedImage}
+                fileName={fileName}
+                isProcessing={isProcessing}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Info cards */}
+        {!originalImage && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-10">
+            {[
+              {
+                icon: '🔒',
+                title: 'Privacy First',
+                desc: 'All processing happens in your browser. No images are uploaded to any server.',
+              },
+              {
+                icon: '⚡',
+                title: 'Fast Processing',
+                desc: 'Canvas-based pixel manipulation runs instantly on your device.',
+              },
+              {
+                icon: '🎨',
+                title: 'Multiple Methods',
+                desc: 'Choose between remove, blur, fill, or smart inpainting to hide watermarks.',
+              },
+            ].map((card) => (
+              <div key={card.title} className="bg-white/5 border border-white/10 rounded-xl p-5">
+                <div className="text-2xl mb-2">{card.icon}</div>
+                <h3 className="text-white font-semibold mb-1">{card.title}</h3>
+                <p className="text-white/50 text-sm">{card.desc}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </main>
   );
 }
