@@ -39,13 +39,57 @@ function calculateAlphaMap(bgImageData: ImageData): Float32Array {
 // ─── Reverse alpha blending (from reference repo: blendModes.js) ─────────────
 const ALPHA_THRESHOLD = 0.002;
 const MAX_ALPHA = 0.99;
-const LOGO_VALUE = 255; // Gemini logo is white (255,255,255)
+
+/**
+ * Detects whether the Gemini watermark in the image region is light (white)
+ * or dark (black) by sampling the brightest pixels in the watermark area
+ * and comparing them to the surrounding background.
+ *
+ * Returns the logo pixel value: 255 for white logo, 0 for dark/black logo.
+ */
+function detectLogoValue(
+  imageData: ImageData,
+  alphaMap: Float32Array,
+  position: { x: number; y: number; width: number; height: number }
+): number {
+  const { x, y, width, height } = position;
+
+  // Sample pixels where the alpha map is strong (watermark is present)
+  let brightSum = 0;
+  let darkSum = 0;
+  let count = 0;
+
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const alphaIdx = row * width + col;
+      const alpha = alphaMap[alphaIdx];
+      if (alpha < 0.3) continue; // Only sample strong watermark pixels
+
+      const imgIdx = ((y + row) * imageData.width + (x + col)) * 4;
+      const r = imageData.data[imgIdx];
+      const g = imageData.data[imgIdx + 1];
+      const b = imageData.data[imgIdx + 2];
+      const brightness = (r + g + b) / 3;
+
+      if (brightness > 128) brightSum++;
+      else darkSum++;
+      count++;
+    }
+  }
+
+  if (count === 0) return 255; // Default to white if no strong pixels found
+
+  // If more pixels are bright than dark, the logo is white; otherwise dark
+  return brightSum >= darkSum ? 255 : 0;
+}
 
 /**
  * Reverses the alpha blending formula to recover the original pixel value
  * underneath the watermark:
  *   watermarked = alpha * LOGO_VALUE + (1 - alpha) * original
  *   => original = (watermarked - alpha * LOGO_VALUE) / (1 - alpha)
+ *
+ * Works for both white (LOGO_VALUE=255) and dark/black (LOGO_VALUE=0) logos.
  */
 function removeWatermarkRegion(
   imageData: ImageData,
@@ -53,6 +97,9 @@ function removeWatermarkRegion(
   position: { x: number; y: number; width: number; height: number }
 ) {
   const { x, y, width, height } = position;
+
+  // Auto-detect whether the logo is white or dark in this image
+  const logoValue = detectLogoValue(imageData, alphaMap, position);
 
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
@@ -65,8 +112,8 @@ function removeWatermarkRegion(
 
       for (let c = 0; c < 3; c++) {
         const watermarked = imageData.data[imgIdx + c];
-        // Reverse alpha blending
-        const original = (watermarked - alpha * LOGO_VALUE) / (1.0 - alpha);
+        // Reverse alpha blending: original = (watermarked - alpha * logoValue) / (1 - alpha)
+        const original = (watermarked - alpha * logoValue) / (1.0 - alpha);
         imageData.data[imgIdx + c] = Math.max(0, Math.min(255, Math.round(original)));
       }
     }
@@ -95,23 +142,54 @@ function getWatermarkInfo(width: number, height: number) {
 
 // ─── Load a reference background image and extract its alpha map ─────────────
 async function loadAlphaMap(src: string, size: number): Promise<Float32Array> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = size;
-      canvas.height = size;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { reject(new Error('No 2d context')); return; }
-      ctx.drawImage(img, 0, 0, size, size);
-      const imageData = ctx.getImageData(0, 0, size, size);
-      resolve(calculateAlphaMap(imageData));
-    };
-    img.onerror = () => reject(new Error(`Failed to load ${src}`));
-    // crossOrigin must be set before src to avoid canvas taint on mobile browsers
-    img.crossOrigin = 'anonymous';
-    img.src = src;
-  });
+  // Helper: draw an image element onto a canvas and extract the alpha map
+  const extractFromImg = (img: HTMLImageElement): Float32Array => {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('No 2d context');
+    ctx.drawImage(img, 0, 0, size, size);
+    const imageData = ctx.getImageData(0, 0, size, size);
+    return calculateAlphaMap(imageData);
+  };
+
+  // Primary: fetch as blob to avoid CORS/canvas-taint issues on mobile browsers
+  try {
+    const res = await fetch(src);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          resolve(extractFromImg(img));
+        } catch (e) {
+          reject(e);
+        } finally {
+          URL.revokeObjectURL(blobUrl);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(blobUrl);
+        reject(new Error(`Failed to load blob for ${src}`));
+      };
+      img.src = blobUrl;
+    });
+  } catch {
+    // Fallback: try direct load with crossOrigin (desktop browsers)
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try { resolve(extractFromImg(img)); }
+        catch (e) { reject(e); }
+      };
+      img.onerror = () => reject(new Error(`Failed to load ${src}`));
+      img.crossOrigin = 'anonymous';
+      img.src = src;
+    });
+  }
 }
 
 // ─── Load image with SVG/CORS support ────────────────────────────────────────
