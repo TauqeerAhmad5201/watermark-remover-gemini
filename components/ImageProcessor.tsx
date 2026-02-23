@@ -36,90 +36,6 @@ function calculateAlphaMap(bgImageData: ImageData): Float32Array {
   return alphaMap;
 }
 
-// ─── Reverse alpha blending (from reference repo: blendModes.js) ─────────────
-const ALPHA_THRESHOLD = 0.002;
-const MAX_ALPHA = 0.99;
-
-/**
- * Detects whether the Gemini watermark in the image region is light (white)
- * or dark (black) by sampling the brightest pixels in the watermark area
- * and comparing them to the surrounding background.
- *
- * Returns the logo pixel value: 255 for white logo, 0 for dark/black logo.
- */
-function detectLogoValue(
-  imageData: ImageData,
-  alphaMap: Float32Array,
-  position: { x: number; y: number; width: number; height: number }
-): number {
-  const { x, y, width, height } = position;
-
-  // Sample pixels where the alpha map is strong (watermark is present)
-  let brightSum = 0;
-  let darkSum = 0;
-  let count = 0;
-
-  for (let row = 0; row < height; row++) {
-    for (let col = 0; col < width; col++) {
-      const alphaIdx = row * width + col;
-      const alpha = alphaMap[alphaIdx];
-      if (alpha < 0.3) continue; // Only sample strong watermark pixels
-
-      const imgIdx = ((y + row) * imageData.width + (x + col)) * 4;
-      const r = imageData.data[imgIdx];
-      const g = imageData.data[imgIdx + 1];
-      const b = imageData.data[imgIdx + 2];
-      const brightness = (r + g + b) / 3;
-
-      if (brightness > 128) brightSum++;
-      else darkSum++;
-      count++;
-    }
-  }
-
-  if (count === 0) return 255; // Default to white if no strong pixels found
-
-  // If more pixels are bright than dark, the logo is white; otherwise dark
-  return brightSum >= darkSum ? 255 : 0;
-}
-
-/**
- * Reverses the alpha blending formula to recover the original pixel value
- * underneath the watermark:
- *   watermarked = alpha * LOGO_VALUE + (1 - alpha) * original
- *   => original = (watermarked - alpha * LOGO_VALUE) / (1 - alpha)
- *
- * Works for both white (LOGO_VALUE=255) and dark/black (LOGO_VALUE=0) logos.
- */
-function removeWatermarkRegion(
-  imageData: ImageData,
-  alphaMap: Float32Array,
-  position: { x: number; y: number; width: number; height: number }
-) {
-  const { x, y, width, height } = position;
-
-  // Auto-detect whether the logo is white or dark in this image
-  const logoValue = detectLogoValue(imageData, alphaMap, position);
-
-  for (let row = 0; row < height; row++) {
-    for (let col = 0; col < width; col++) {
-      const imgIdx = ((y + row) * imageData.width + (x + col)) * 4;
-      const alphaIdx = row * width + col;
-
-      let alpha = alphaMap[alphaIdx];
-      if (alpha < ALPHA_THRESHOLD) continue;
-      alpha = Math.min(alpha, MAX_ALPHA);
-
-      for (let c = 0; c < 3; c++) {
-        const watermarked = imageData.data[imgIdx + c];
-        // Reverse alpha blending: original = (watermarked - alpha * logoValue) / (1 - alpha)
-        const original = (watermarked - alpha * logoValue) / (1.0 - alpha);
-        imageData.data[imgIdx + c] = Math.max(0, Math.min(255, Math.round(original)));
-      }
-    }
-  }
-}
-
 // ─── Watermark position calculation (from reference repo: engine.js) ─────────
 /**
  * Gemini places its watermark logo in the bottom-right corner.
@@ -371,6 +287,94 @@ function applyInpaint(
   applyBoxBlur(ctx, x, y, w, h, 5, 2);
 }
 
+// ─── Alpha-map-guided inpaint ─────────────────────────────────────────────────
+/**
+ * Uses the alpha map to identify watermark pixels, then reconstructs each
+ * watermark pixel by sampling nearby non-watermark pixels (distance-weighted).
+ * This works regardless of the watermark color (white, black, or any color).
+ *
+ * For each watermark pixel (alpha > threshold), we look outward in a spiral
+ * to find the nearest non-watermark pixels and blend them.
+ */
+function removeWatermarkWithAlphaMap(
+  imageData: ImageData,
+  alphaMap: Float32Array,
+  position: { x: number; y: number; width: number; height: number },
+  canvasWidth: number,
+  canvasHeight: number
+) {
+  const { x: ox, y: oy, width: w, height: h } = position;
+  const ALPHA_THRESHOLD = 0.05;
+  const SEARCH_RADIUS = Math.max(w, h) + 8; // search beyond the watermark bounds
+
+  const data = imageData.data;
+
+  // Build a mask: true = watermark pixel (needs reconstruction)
+  const mask = new Uint8Array(w * h);
+  for (let row = 0; row < h; row++) {
+    for (let col = 0; col < w; col++) {
+      if (alphaMap[row * w + col] > ALPHA_THRESHOLD) {
+        mask[row * w + col] = 1;
+      }
+    }
+  }
+
+  // For each masked pixel, find surrounding non-masked pixels and blend
+  for (let row = 0; row < h; row++) {
+    for (let col = 0; col < w; col++) {
+      if (!mask[row * w + col]) continue;
+
+      // Collect nearby non-watermark pixels with distance weighting
+      let rSum = 0, gSum = 0, bSum = 0, wSum = 0;
+
+      for (let radius = 1; radius <= SEARCH_RADIUS && wSum < 8; radius++) {
+        // Sample pixels at this radius distance (ring sampling)
+        const step = Math.max(1, Math.floor(radius / 2));
+        for (let dy = -radius; dy <= radius; dy += step) {
+          for (let dx = -radius; dx <= radius; dx += step) {
+            // Only sample pixels approximately at this radius
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < radius - 1 || dist > radius + 1) continue;
+
+            const sRow = row + dy;
+            const sCol = col + dx;
+
+            // Check if within watermark region
+            if (sRow >= 0 && sRow < h && sCol >= 0 && sCol < w) {
+              // Within watermark region: only use non-masked pixels
+              if (mask[sRow * w + sCol]) continue;
+              const imgIdx = ((oy + sRow) * canvasWidth + (ox + sCol)) * 4;
+              const weight = 1.0 / (dist * dist);
+              rSum += data[imgIdx] * weight;
+              gSum += data[imgIdx + 1] * weight;
+              bSum += data[imgIdx + 2] * weight;
+              wSum += weight;
+            } else {
+              // Outside watermark region: always usable (no watermark there)
+              const absRow = oy + sRow;
+              const absCol = ox + sCol;
+              if (absRow < 0 || absRow >= canvasHeight || absCol < 0 || absCol >= canvasWidth) continue;
+              const imgIdx = (absRow * canvasWidth + absCol) * 4;
+              const weight = 1.0 / (dist * dist);
+              rSum += data[imgIdx] * weight;
+              gSum += data[imgIdx + 1] * weight;
+              bSum += data[imgIdx + 2] * weight;
+              wSum += weight;
+            }
+          }
+        }
+      }
+
+      if (wSum > 0) {
+        const imgIdx = ((oy + row) * canvasWidth + (ox + col)) * 4;
+        data[imgIdx] = Math.round(rSum / wSum);
+        data[imgIdx + 1] = Math.round(gSum / wSum);
+        data[imgIdx + 2] = Math.round(bSum / wSum);
+      }
+    }
+  }
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 const ImageProcessor = forwardRef<ImageProcessorHandle, ImageProcessorProps>(
   ({ imageSrc, settings, onProcessed }, ref) => {
@@ -396,12 +400,13 @@ const ImageProcessor = forwardRef<ImageProcessorHandle, ImageProcessorProps>(
 
         const { width, height } = canvas;
 
-        // ── Auto mode: use reference-based reverse alpha blending ──────────
+        // ── Auto mode: use reference-based alpha-map-guided inpainting ────
         const info = getWatermarkInfo(width, height);
 
         if (settings.method === 'remove' || settings.method === 'inpaint') {
-          // Primary method: mathematically remove the watermark using
-          // the reference alpha maps from the reference repo
+          // Primary method: use the alpha map to identify watermark pixels,
+          // then reconstruct them from surrounding non-watermark pixels.
+          // This works for any watermark color (white, black, colored).
           try {
             const alphaMap = await loadAlphaMap(
               info.size === 96 ? '/bg_96.png' : '/bg_48.png',
@@ -409,12 +414,15 @@ const ImageProcessor = forwardRef<ImageProcessorHandle, ImageProcessorProps>(
             );
 
             const imageData = ctx.getImageData(0, 0, width, height);
-            removeWatermarkRegion(imageData, alphaMap, info);
+            removeWatermarkWithAlphaMap(imageData, alphaMap, info, width, height);
             ctx.putImageData(imageData, 0, 0);
+
+            // Final smoothing pass to blend the reconstructed region
+            applyBoxBlur(ctx, info.x, info.y, info.width, info.height, 3, 2);
           } catch (e) {
-            console.warn('Alpha map load failed, falling back to blur:', e);
-            // Fallback to blur if assets unavailable
-            applyBoxBlur(ctx, info.x, info.y, info.width, info.height, settings.blurRadius, 4);
+            console.warn('Alpha map load failed, falling back to inpaint:', e);
+            // Fallback to smart inpaint if alpha map assets unavailable
+            applyInpaint(ctx, info.x, info.y, info.width, info.height, width, height);
           }
         } else if (settings.method === 'blur') {
           applyBoxBlur(ctx, info.x, info.y, info.width, info.height, settings.blurRadius, 4);
