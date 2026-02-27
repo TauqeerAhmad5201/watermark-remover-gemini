@@ -70,6 +70,9 @@ Desktop.ini
 *.cert
 *.p12
 
+# ─── Kubernetes secrets (never commit real values) ───────────────────────────
+k8s/app/secret.yaml
+
 # ─── Miscellaneous ───────────────────────────────────────────────────────────
 *.log
 *.tmp
