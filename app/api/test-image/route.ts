@@ -1,8 +1,9 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { withMetrics } from '../../../lib/withMetrics';
 
 // This route generates a test PNG image with a simulated Gemini watermark
 // using raw pixel manipulation (no canvas dependency needed server-side)
-export async function GET() {
+export const GET = withMetrics('/api/test-image', async (_req: NextRequest) => {
   // We'll redirect to the static HTML page that generates the image client-side
   // Instead, return a simple SVG that looks like a Gemini watermarked image
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600">
@@ -54,4 +55,4 @@ export async function GET() {
       'Cache-Control': 'no-cache',
     },
   });
-}
+});

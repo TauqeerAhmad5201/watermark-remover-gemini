@@ -1,0 +1,348 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: watermark-app-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  watermark-app.json: |
+    {
+      "title": "Watermark App",
+      "uid": "watermark-app-dashboard",
+      "schemaVersion": 36,
+      "version": 1,
+      "refresh": "15s",
+      "time": {"from": "now-1h", "to": "now"},
+      "tags": ["watermark-app", "nodejs"],
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Running Pods",
+          "gridPos": {"x": 0, "y": 0, "w": 4, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "count(kube_pod_status_ready{namespace=\"watermark-app\", condition=\"true\"} == 1)",
+              "legendFormat": "Ready Pods"
+            }
+          ],
+          "options": {"colorMode": "background", "graphMode": "none"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"steps": [{"color": "red", "value": 0}, {"color": "yellow", "value": 3}, {"color": "green", "value": 5}]}
+            }
+          }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Container Restarts (last 15m)",
+          "gridPos": {"x": 4, "y": 0, "w": 4, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"watermark-app\", container=\"watermark-app\"}[15m]))",
+              "legendFormat": "Restarts"
+            }
+          ],
+          "options": {"colorMode": "background", "graphMode": "none"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"steps": [{"color": "green", "value": 0}, {"color": "red", "value": 1}]}
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Unavailable Replicas",
+          "gridPos": {"x": 8, "y": 0, "w": 4, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "kube_deployment_status_replicas_unavailable{namespace=\"watermark-app\", deployment=\"watermark-app\"}",
+              "legendFormat": "Unavailable"
+            }
+          ],
+          "options": {"colorMode": "background", "graphMode": "none"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"steps": [{"color": "green", "value": 0}, {"color": "red", "value": 1}]}
+            }
+          }
+        },
+        {
+          "id": 10,
+          "type": "stat",
+          "title": "Total Requests (last 5m)",
+          "description": "Total HTTP requests received by the app",
+          "gridPos": {"x": 12, "y": 0, "w": 4, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "sum(increase(watermark_app_http_requests_total[5m]))",
+              "legendFormat": "Requests"
+            }
+          ],
+          "options": {"colorMode": "background", "graphMode": "area"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"steps": [{"color": "blue", "value": 0}]}
+            }
+          }
+        },
+        {
+          "id": 11,
+          "type": "stat",
+          "title": "Error Rate (last 5m)",
+          "description": "Percentage of 4xx/5xx responses",
+          "gridPos": {"x": 16, "y": 0, "w": 4, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "sum(increase(watermark_app_http_requests_total{status_code=~\"4..|5..\"}[5m])) / sum(increase(watermark_app_http_requests_total[5m])) * 100",
+              "legendFormat": "Error %"
+            }
+          ],
+          "options": {"colorMode": "background", "graphMode": "none"},
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "color": {"mode": "thresholds"},
+              "thresholds": {"steps": [{"color": "green", "value": 0}, {"color": "yellow", "value": 1}, {"color": "red", "value": 5}]}
+            }
+          }
+        },
+        {
+          "id": 12,
+          "type": "stat",
+          "title": "Avg Response Time (last 5m)",
+          "description": "Average HTTP response latency",
+          "gridPos": {"x": 20, "y": 0, "w": 4, "h": 4},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "sum(rate(watermark_app_http_request_duration_seconds_sum[5m])) / sum(rate(watermark_app_http_request_duration_seconds_count[5m])) * 1000",
+              "legendFormat": "Avg Latency"
+            }
+          ],
+          "options": {"colorMode": "background", "graphMode": "none"},
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "color": {"mode": "thresholds"},
+              "thresholds": {"steps": [{"color": "green", "value": 0}, {"color": "yellow", "value": 500}, {"color": "red", "value": 1000}]}
+            }
+          }
+        },
+        {
+          "id": 13,
+          "type": "timeseries",
+          "title": "Request Rate by Route (req/s)",
+          "description": "Incoming requests per second split by route and method",
+          "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "sum by (route, method) (rate(watermark_app_http_requests_total[2m]))",
+              "legendFormat": "{{method}} {{route}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "reqps", "custom": {"lineWidth": 1}}
+          }
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "Requests by Status Code",
+          "description": "2xx success vs 4xx/5xx errors over time",
+          "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "sum by (status_code) (rate(watermark_app_http_requests_total[2m]))",
+              "legendFormat": "HTTP {{status_code}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "reqps", "custom": {"lineWidth": 1}},
+            "overrides": [
+              {"matcher": {"id": "byRegexp", "options": "HTTP 4..|HTTP 5.."}, "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]},
+              {"matcher": {"id": "byRegexp", "options": "HTTP 2.."}, "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]}
+            ]
+          }
+        },
+        {
+          "id": 15,
+          "type": "timeseries",
+          "title": "Response Latency Percentiles (p50 / p95 / p99)",
+          "description": "How fast the app responds to users",
+          "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(watermark_app_http_request_duration_seconds_bucket[2m]))) * 1000",
+              "legendFormat": "p50"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(watermark_app_http_request_duration_seconds_bucket[2m]))) * 1000",
+              "legendFormat": "p95"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(watermark_app_http_request_duration_seconds_bucket[2m]))) * 1000",
+              "legendFormat": "p99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "ms", "custom": {"lineWidth": 2}}
+          }
+        },
+        {
+          "id": 16,
+          "type": "heatmap",
+          "title": "Request Duration Heatmap",
+          "description": "Distribution of response times",
+          "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "sum by (le) (rate(watermark_app_http_request_duration_seconds_bucket[2m]))",
+              "legendFormat": "{{le}}",
+              "format": "heatmap"
+            }
+          ],
+          "options": {"calculate": false}
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "CPU Usage per Pod",
+          "gridPos": {"x": 0, "y": 20, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "rate(container_cpu_usage_seconds_total{namespace=\"watermark-app\", container=\"watermark-app\"}[2m]) * 1000",
+              "legendFormat": "{{pod}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "ms", "custom": {"lineWidth": 1}}
+          }
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Memory Working Set per Pod",
+          "gridPos": {"x": 12, "y": 20, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "container_memory_working_set_bytes{namespace=\"watermark-app\", container=\"watermark-app\"}",
+              "legendFormat": "{{pod}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "bytes", "custom": {"lineWidth": 1}}
+          }
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Node.js Heap Used vs Total",
+          "gridPos": {"x": 0, "y": 28, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "watermark_app_nodejs_heap_size_used_bytes",
+              "legendFormat": "Heap Used — {{pod}}"
+            },
+            {
+              "expr": "watermark_app_nodejs_heap_size_total_bytes",
+              "legendFormat": "Heap Total — {{pod}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "bytes", "custom": {"lineWidth": 1}}
+          }
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Node.js Event Loop Lag",
+          "gridPos": {"x": 12, "y": 28, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "watermark_app_nodejs_eventloop_lag_p99_seconds",
+              "legendFormat": "p99 Lag — {{pod}}"
+            },
+            {
+              "expr": "watermark_app_nodejs_eventloop_lag_p50_seconds",
+              "legendFormat": "p50 Lag — {{pod}}"
+            },
+            {
+              "expr": "watermark_app_nodejs_eventloop_lag_mean_seconds",
+              "legendFormat": "mean Lag — {{pod}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "s", "custom": {"lineWidth": 1}}
+          }
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "Active Handles & Requests",
+          "gridPos": {"x": 0, "y": 36, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "watermark_app_nodejs_active_handles_total",
+              "legendFormat": "Handles — {{pod}}"
+            },
+            {
+              "expr": "watermark_app_nodejs_active_requests_total",
+              "legendFormat": "Requests — {{pod}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "short", "custom": {"lineWidth": 1}}
+          }
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "GC Duration (per type)",
+          "gridPos": {"x": 12, "y": 36, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {
+              "expr": "rate(watermark_app_nodejs_gc_duration_seconds_sum[2m])",
+              "legendFormat": "{{kind}} — {{pod}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "s", "custom": {"lineWidth": 1}}
+          }
+        }
+      ],
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {},
+            "hide": 0,
+            "label": "Datasource"
+          }
+        ]
+      }
+    }

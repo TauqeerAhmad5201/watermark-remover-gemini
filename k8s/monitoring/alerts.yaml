@@ -1,0 +1,124 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: watermark-app-alerts
+  namespace: monitoring
+  labels:
+    app: watermark-app
+    release: kube-prometheus-stack  # must match the Helm release name
+spec:
+  groups:
+    # ── Pod Health ─────────────────────────────────────────────────────────────
+    - name: watermark-app.pod
+      rules:
+        - alert: WatermarkAppPodNotReady
+          expr: |
+            kube_pod_status_ready{
+              namespace="watermark-app",
+              condition="true"
+            } == 0
+          for: 2m
+          labels:
+            severity: critical
+            app: watermark-app
+          annotations:
+            summary: "Pod {{ $labels.pod }} is not ready"
+            description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been not ready for more than 2 minutes."
+
+        - alert: WatermarkAppContainerRestarting
+          expr: |
+            increase(
+              kube_pod_container_status_restarts_total{
+                namespace="watermark-app",
+                container="watermark-app"
+              }[15m]
+            ) > 0
+          for: 0m
+          labels:
+            severity: warning
+            app: watermark-app
+          annotations:
+            summary: "Container {{ $labels.container }} is restarting"
+            description: "Container {{ $labels.container }} in pod {{ $labels.pod }} has restarted in the last 15 minutes."
+
+        - alert: WatermarkAppDeploymentUnavailable
+          expr: |
+            kube_deployment_status_replicas_unavailable{
+              namespace="watermark-app",
+              deployment="watermark-app"
+            } > 0
+          for: 2m
+          labels:
+            severity: warning
+            app: watermark-app
+          annotations:
+            summary: "Deployment has unavailable replicas"
+            description: "Deployment watermark-app has {{ $value }} unavailable replica(s) for more than 2 minutes."
+
+    # ── CPU ────────────────────────────────────────────────────────────────────
+    - name: watermark-app.cpu
+      rules:
+        - alert: WatermarkAppHighCPU
+          expr: |
+            (
+              rate(container_cpu_usage_seconds_total{
+                namespace="watermark-app",
+                container="watermark-app"
+              }[5m])
+            /
+              kube_pod_container_resource_limits{
+                namespace="watermark-app",
+                container="watermark-app",
+                resource="cpu"
+              }
+            ) * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+            app: watermark-app
+          annotations:
+            summary: "High CPU usage on {{ $labels.pod }}"
+            description: "Container {{ $labels.container }} in pod {{ $labels.pod }} is using {{ $value | humanize }}% of its CPU limit for more than 5 minutes."
+
+    # ── Memory ─────────────────────────────────────────────────────────────────
+    - name: watermark-app.memory
+      rules:
+        - alert: WatermarkAppHighMemory
+          expr: |
+            (
+              container_memory_working_set_bytes{
+                namespace="watermark-app",
+                container="watermark-app"
+              }
+            /
+              kube_pod_container_resource_limits{
+                namespace="watermark-app",
+                container="watermark-app",
+                resource="memory"
+              }
+            ) * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+            app: watermark-app
+          annotations:
+            summary: "High memory usage on {{ $labels.pod }}"
+            description: "Container {{ $labels.container }} in pod {{ $labels.pod }} is using {{ $value | humanize }}% of its memory limit for more than 5 minutes."
+
+    # ── Node.js App ────────────────────────────────────────────────────────────
+    - name: watermark-app.nodejs
+      rules:
+        - alert: WatermarkAppHighHeapUsage
+          expr: |
+            (
+              watermark_app_nodejs_heap_size_used_bytes
+            /
+              watermark_app_nodejs_heap_size_total_bytes
+            ) * 100 > 85
+          for: 5m
+          labels:
+            severity: warning
+            app: watermark-app
+          annotations:
+            summary: "High Node.js heap usage on {{ $labels.instance }}"
+            description: "Node.js heap usage on {{ $labels.instance }} is above 85% for more than 5 minutes."
