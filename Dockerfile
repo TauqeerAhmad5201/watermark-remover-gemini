@@ -36,6 +36,9 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Copy the server routes into standalone
+COPY --from=builder --chown=nextjs:nodejs /app/.next/server ./.next/server
+
 USER nextjs
 
 # Expose the port

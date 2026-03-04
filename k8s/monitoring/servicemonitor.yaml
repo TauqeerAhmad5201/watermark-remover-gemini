@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: watermark-app
+  namespace: monitoring
+  labels:
+    app: watermark-app
+    release: kube-prometheus-stack  # must match the Helm release name
+spec:
+  namespaceSelector:
+    matchNames:
+      - watermark-app
+  selector:
+    matchLabels:
+      app: watermark-app
+  endpoints:
+    - port: http          # must match the named port in the Service
+      path: /api/metrics
+      interval: 15s
+      scrapeTimeout: 10s

@@ -10,6 +10,7 @@ spec:
   selector:
     app: watermark-app
   ports:
-    - port: 80
-      targetPort: 3000
-      nodePort: 30080
+    - name: http
+      port: 80 ## service port -> used in terminal commands and other services
+      targetPort: 3000 ## containerPort in Deployment
+      nodePort: 30080 ## optional, if not specified Kubernetes will assign a random port in the range 30000-32767

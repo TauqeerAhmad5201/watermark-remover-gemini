@@ -72,6 +72,7 @@ Desktop.ini
 
 # ─── Kubernetes secrets (never commit real values) ───────────────────────────
 k8s/app/secret.yaml
+k8s/monitoring/grafana-secret.yaml
 
 # ─── Miscellaneous ───────────────────────────────────────────────────────────
 *.log
